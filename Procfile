@@ -1,0 +1,1 @@
+web: gunicorn resumex.wsgi --bind 0.0.0.0:$PORT
