@@ -95,7 +95,7 @@ if MYSQL_URL:
             'USER': os.environ.get('MYSQLUSER'),
             'PASSWORD': os.environ.get('MYSQLPASSWORD'),
             'HOST': os.environ.get('MYSQLHOST'),
-            'PORT': os.environ.get('MYSQLPORT'),
+            'PORT': int(os.environ.get('MYSQLPORT', 3306)),
         }
     }
 else:
@@ -106,7 +106,7 @@ else:
             'USER': os.environ.get('DB_USER', 'root'),
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
             'HOST': os.environ.get('DB_HOST', 'localhost'),
-            'PORT': os.environ.get('DB_PORT', '3306'),
+            'PORT': int(os.environ.get('DB_PORT', 3306)),
         }
     }
 
