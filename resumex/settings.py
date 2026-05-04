@@ -85,17 +85,20 @@ WSGI_APPLICATION = "resumex.wsgi.application"
 
 # import dj_database_url
 
+import urllib.parse
+
 MYSQL_URL = os.environ.get('MYSQL_URL')
 
 if MYSQL_URL:
+    parsed = urllib.parse.urlparse(MYSQL_URL)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
-            'NAME': os.environ.get('MYSQLDATABASE'),
-            'USER': os.environ.get('MYSQLUSER'),
-            'PASSWORD': os.environ.get('MYSQLPASSWORD'),
-            'HOST': os.environ.get('MYSQLHOST'),
-            'PORT': int(os.environ.get('MYSQLPORT', 3306)),
+            'NAME': parsed.path[1:],
+            'USER': parsed.username,
+            'PASSWORD': parsed.password,
+            'HOST': parsed.hostname,
+            'PORT': parsed.port or 3306,
         }
     }
 else:
@@ -109,7 +112,6 @@ else:
             'PORT': int(os.environ.get('DB_PORT', 3306)),
         }
     }
-
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
