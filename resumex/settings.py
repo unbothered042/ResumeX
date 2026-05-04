@@ -24,12 +24,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-_o*gldvz^k3)+7&k2wggbz8ff#u5$o*+mhusn4jhut!1d-n(pl"
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-_o*gldvz^k3)+7&k2wggbz8ff#u5$o*+mhusn4jhut!1d-n(pl')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    'resumex-production.up.railway.app',
+    '.railway.app',
+]
 
 
 # Application definition
@@ -166,9 +171,10 @@ SIMPLE_JWT = {
 }
 
 # CORS
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://cvx-app.vercel.app",
 ]
