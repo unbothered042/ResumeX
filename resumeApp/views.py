@@ -6,7 +6,7 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import Analysis
 from .serializers import AnalysisSerializer
 from .ai_service import analyze_cv, rewrite_cv, generate_cover_letter, generate_cv_pdf, generate_cover_letter_pdf
@@ -14,7 +14,7 @@ from django.http import FileResponse
 
 
 class AnalyzeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         job_description = request.data.get('job_description')
@@ -40,33 +40,58 @@ class AnalyzeView(APIView):
         elif not cv_text:
             return Response({'error': 'Either cv_file (PDF) or cv_text is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # CV rewrite and cover letter require login
+        if cv_rewrite_requested or cover_letter_requested:
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Please create a free account to access CV rewrite and cover letter features.', 'requires_auth': True},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
         ai_result = analyze_cv(cv_text, job_description)
 
-        analysis = Analysis.objects.create(
-            user=request.user,
-            cv_text=cv_text,
-            job_description=job_description,
-            match_score=ai_result['match_score'],
-            matched_skills=ai_result['matched_skills'],
-            missing_skills=ai_result['missing_skills'],
-            improvement_tips=ai_result['improvement_tips'],
-            summary=ai_result['summary'],
-            cv_rewrite_requested=cv_rewrite_requested,
-            cover_letter_requested=cover_letter_requested,
-        )
+        # Only save to database if user is logged in
+        if request.user.is_authenticated:
+            analysis = Analysis.objects.create(
+                user=request.user,
+                cv_text=cv_text,
+                job_description=job_description,
+                match_score=ai_result['match_score'],
+                matched_skills=ai_result['matched_skills'],
+                missing_skills=ai_result['missing_skills'],
+                improvement_tips=ai_result['improvement_tips'],
+                summary=ai_result['summary'],
+                cv_rewrite_requested=cv_rewrite_requested,
+                cover_letter_requested=cover_letter_requested,
+            )
 
-        if cv_rewrite_requested:
-            rewritten = rewrite_cv(cv_text, job_description, ai_result['matched_skills'], ai_result['missing_skills'], ai_result['improvement_tips'])
-            analysis.rewritten_cv = rewritten
-            analysis.save()
+            if cv_rewrite_requested:
+                rewritten = rewrite_cv(cv_text, job_description, ai_result['matched_skills'], ai_result['missing_skills'], ai_result['improvement_tips'])
+                analysis.rewritten_cv = rewritten
+                analysis.save()
 
-        if cover_letter_requested:
-            cover_letter = generate_cover_letter(cv_text, job_description, ai_result['matched_skills'], ai_result['improvement_tips'])
-            analysis.cover_letter = cover_letter
-            analysis.save()
+            if cover_letter_requested:
+                cover_letter = generate_cover_letter(cv_text, job_description, ai_result['matched_skills'], ai_result['improvement_tips'])
+                analysis.cover_letter = cover_letter
+                analysis.save()
 
-        serializer = AnalysisSerializer(analysis)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+            serializer = AnalysisSerializer(analysis)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        # Guest user — return analysis without saving
+        return Response({
+            'id': None,
+            'match_score': ai_result['match_score'],
+            'matched_skills': ai_result['matched_skills'],
+            'missing_skills': ai_result['missing_skills'],
+            'improvement_tips': ai_result['improvement_tips'],
+            'summary': ai_result['summary'],
+            'cv_rewrite_requested': False,
+            'rewritten_cv': None,
+            'cover_letter_requested': False,
+            'cover_letter': None,
+            'guest': True,
+        }, status=status.HTTP_200_OK)
 
 
 class AnalysisHistoryView(APIView):
