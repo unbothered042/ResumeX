@@ -49,8 +49,7 @@ def analyze_cv(cv_text, job_description):
 
 def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improvement_tips):
     prompt = f"""
-    You are an expert CV writer. Rewrite the following CV to better match the job description.
-    Use the analysis insights provided to improve the CV.
+    You are an expert CV writer. Rewrite the following CV to better match the job description and make sure it's not generic.
 
     Original CV:
     {cv_text}
@@ -80,6 +79,39 @@ def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improve
     return response.choices[0].message.content.strip()
 
 
+def generate_cover_letter(cv_text, job_description, matched_skills, improvement_tips):
+    prompt = f"""
+    You are an expert cover letter writer. Write a professional cover letter based on the CV and job description below and make sure it's not generic.
+
+    CV:
+    {cv_text}
+
+    Job Description:
+    {job_description}
+
+    Analysis Insights:
+    - Matched Skills: {matched_skills}
+    - Improvement Tips: {improvement_tips}
+
+    Instructions:
+    - Write a compelling, professional cover letter
+    - Keep it to 3-4 paragraphs
+    - Opening: express interest and strongest qualification
+    - Middle: highlight matched skills with specific examples from CV
+    - Closing: confident call to action
+    - Do not use generic phrases like "I am writing to apply"
+    - Return plain text only, no extra commentary
+    """
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5,
+    )
+
+    return response.choices[0].message.content.strip()
+
+
 def generate_cv_pdf(rewritten_cv_text, user_full_name):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -88,42 +120,12 @@ def generate_cv_pdf(rewritten_cv_text, user_full_name):
     from reportlab.lib import colors
 
     buffer = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=inch,
-        leftMargin=inch,
-        topMargin=inch,
-        bottomMargin=inch
-    )
-
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=inch, leftMargin=inch, topMargin=inch, bottomMargin=inch)
     styles = getSampleStyleSheet()
 
-    name_style = ParagraphStyle(
-        'NameStyle',
-        parent=styles['Title'],
-        fontSize=20,
-        textColor=colors.HexColor('#1a1a2e'),
-        spaceAfter=6,
-    )
-
-    normal_style = ParagraphStyle(
-        'NormalStyle',
-        parent=styles['Normal'],
-        fontSize=11,
-        leading=16,
-        spaceAfter=6,
-    )
-
-    heading_style = ParagraphStyle(
-        'HeadingStyle',
-        parent=styles['Heading2'],
-        fontSize=13,
-        textColor=colors.HexColor('#1a1a2e'),
-        spaceBefore=12,
-        spaceAfter=4,
-    )
+    name_style = ParagraphStyle('NameStyle', parent=styles['Title'], fontSize=20, textColor=colors.HexColor('#1a1a2e'), spaceAfter=6)
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontSize=11, leading=16, spaceAfter=6)
+    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor('#1a1a2e'), spaceBefore=12, spaceAfter=4)
 
     story = []
     story.append(Paragraph(user_full_name, name_style))
@@ -135,6 +137,37 @@ def generate_cv_pdf(rewritten_cv_text, user_full_name):
             story.append(Spacer(1, 0.1 * inch))
         elif line.isupper() or line.endswith(':'):
             story.append(Paragraph(line, heading_style))
+        else:
+            story.append(Paragraph(line, normal_style))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_cover_letter_pdf(cover_letter_text, user_full_name):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=inch, leftMargin=inch, topMargin=inch, bottomMargin=inch)
+    styles = getSampleStyleSheet()
+
+    name_style = ParagraphStyle('NameStyle', parent=styles['Title'], fontSize=18, textColor=colors.HexColor('#1a1a2e'), spaceAfter=6)
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontSize=11, leading=18, spaceAfter=8)
+
+    story = []
+    story.append(Paragraph(user_full_name, name_style))
+    story.append(Paragraph("Cover Letter", ParagraphStyle('Sub', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor('#666666'), spaceAfter=20)))
+    story.append(Spacer(1, 0.2 * inch))
+
+    for line in cover_letter_text.split('\n'):
+        line = line.strip()
+        if not line:
+            story.append(Spacer(1, 0.1 * inch))
         else:
             story.append(Paragraph(line, normal_style))
 

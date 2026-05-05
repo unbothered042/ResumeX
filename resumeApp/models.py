@@ -13,6 +13,8 @@ class Analysis(models.Model):
     summary = models.TextField()
     cv_rewrite_requested = models.BooleanField(default=False)
     rewritten_cv = models.TextField(null=True, blank=True)
+    cover_letter_requested = models.BooleanField(default=False)
+    cover_letter = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
