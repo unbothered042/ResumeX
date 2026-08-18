@@ -32,8 +32,7 @@ DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    'resumex-production.up.railway.app',
-    '.railway.app',
+    '.onrender.com',
 ]
 
 
@@ -88,33 +87,23 @@ WSGI_APPLICATION = "resumex.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# import dj_database_url
+import dj_database_url
 
-import urllib.parse
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-MYSQL_URL = os.environ.get('MYSQL_URL')
-
-if MYSQL_URL:
-    parsed = urllib.parse.urlparse(MYSQL_URL)
+if DATABASE_URL:
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.mysql',
-            'NAME': parsed.path[1:],
-            'USER': parsed.username,
-            'PASSWORD': parsed.password,
-            'HOST': parsed.hostname,
-            'PORT': parsed.port or 3306,
-        }
+        'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
     }
 else:
     DATABASES = {
         'default': {
-            'ENGINE': 'django.db.backends.mysql',
+            'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.environ.get('DB_NAME', 'resumex_db'),
-            'USER': os.environ.get('DB_USER', 'root'),
+            'USER': os.environ.get('DB_USER', 'postgres'),
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
             'HOST': os.environ.get('DB_HOST', 'localhost'),
-            'PORT': int(os.environ.get('DB_PORT', 3306)),
+            'PORT': int(os.environ.get('DB_PORT', 5432)),
         }
     }
 # Password validation

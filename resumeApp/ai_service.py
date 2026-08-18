@@ -11,7 +11,7 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def analyze_cv(cv_text, job_description):
     prompt = f"""
-    You are an expert CV/Resume analyst. Analyze the following CV against the job description and return a JSON response only, no extra text.
+    You are an expert CV/Resume analyst with a degree from harvard and you are highly regarded and recommeneded. Analyze the following CV against the job description and return a JSON response only, no extra text.
 
     CV:
     {cv_text}
@@ -32,7 +32,7 @@ def analyze_cv(cv_text, job_description):
     """
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
@@ -49,7 +49,7 @@ def analyze_cv(cv_text, job_description):
 
 def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improvement_tips):
     prompt = f"""
-    You are an expert CV writer. Rewrite the following CV to better match the job description and make sure it's not generic.
+    You are an expert CV writer with a degree from harvard and you are highly regarded and recommeneded. Rewrite the following CV to better match the job description and make sure it's not generic.
 
     Original CV:
     {cv_text}
@@ -71,7 +71,7 @@ def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improve
     """
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
     )
@@ -81,7 +81,7 @@ def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improve
 
 def generate_cover_letter(cv_text, job_description, matched_skills, improvement_tips):
     prompt = f"""
-    You are an expert cover letter writer. Write a professional cover letter based on the CV and job description below and make sure it's not generic.
+    You are an expert cover letter writer with a degree from harvard and you are highly regarded and recommeneded. Write a professional cover letter based on the CV and job description below and make sure it's not generic.
 
     CV:
     {cv_text}
@@ -99,12 +99,12 @@ def generate_cover_letter(cv_text, job_description, matched_skills, improvement_
     - Opening: express interest and strongest qualification
     - Middle: highlight matched skills with specific examples from CV
     - Closing: confident call to action
-    - Do not use generic phrases like "I am writing to apply"
+    - Do not use generic phrases like "I am writing to apply" and make sure no dashes "--" are used
     - Return plain text only, no extra commentary
     """
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
     )
