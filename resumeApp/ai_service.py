@@ -99,7 +99,7 @@ def generate_cover_letter(cv_text, job_description, matched_skills, improvement_
     - Opening: express interest and strongest qualification
     - Middle: highlight matched skills with specific examples from CV
     - Closing: confident call to action
-    - Do not use generic phrases like "I am writing to apply" and make sure no dashes "--" are used
+    - Do not use generic phrases like "I am writing to apply"
     - Return plain text only, no extra commentary
     """
 
@@ -112,12 +112,45 @@ def generate_cover_letter(cv_text, job_description, matched_skills, improvement_
     return response.choices[0].message.content.strip()
 
 
+def sanitize_text(text):
+    """Replace Unicode typography that ReportLab's base font can't render
+    (renders as black boxes) with plain ASCII equivalents."""
+    if not text:
+        return text
+
+    replacements = {
+        '\u2013': '-',   # en dash
+        '\u2014': '-',   # em dash
+        '\u2018': "'",   # left single quote
+        '\u2019': "'",   # right single quote
+        '\u201c': '"',   # left double quote
+        '\u201d': '"',   # right double quote
+        '\u2022': '-',   # bullet
+        '\u2026': '...', # ellipsis
+        '\u00a0': ' ',   # non-breaking space
+        '\u2212': '-',   # minus sign
+        '\u2192': '->',  # right arrow
+        '\u2705': '',    # check mark emoji
+        '\u2713': '',    # check mark
+    }
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+
+    # Fallback: strip any remaining character the base font can't encode,
+    # so a stray Unicode symbol never turns into a black box again.
+    text = text.encode('latin-1', errors='ignore').decode('latin-1')
+    return text
+
+
 def generate_cv_pdf(rewritten_cv_text, user_full_name):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.units import inch
     from reportlab.lib import colors
+
+    rewritten_cv_text = sanitize_text(rewritten_cv_text)
+    user_full_name = sanitize_text(user_full_name)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=inch, leftMargin=inch, topMargin=inch, bottomMargin=inch)
@@ -151,6 +184,9 @@ def generate_cover_letter_pdf(cover_letter_text, user_full_name):
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.units import inch
     from reportlab.lib import colors
+
+    cover_letter_text = sanitize_text(cover_letter_text)
+    user_full_name = sanitize_text(user_full_name)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=inch, leftMargin=inch, topMargin=inch, bottomMargin=inch)
