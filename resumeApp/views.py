@@ -27,18 +27,41 @@ class AnalyzeView(APIView):
             return Response({'error': 'job_description is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if cv_file:
-            try:
-                import PyPDF2
-                pdf_reader = PyPDF2.PdfReader(cv_file)
-                cv_text = ""
-                for page in pdf_reader.pages:
-                    cv_text += page.extract_text()
-                if not cv_text.strip():
-                    return Response({'error': 'Could not extract text from PDF.'}, status=status.HTTP_400_BAD_REQUEST)
-            except Exception as e:
-                return Response({'error': f'Failed to read PDF: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            filename = (cv_file.name or '').lower()
+
+            if filename.endswith('.pdf'):
+                try:
+                    import PyPDF2
+                    pdf_reader = PyPDF2.PdfReader(cv_file)
+                    cv_text = ""
+                    for page in pdf_reader.pages:
+                        cv_text += page.extract_text()
+                    if not cv_text.strip():
+                        return Response({'error': 'Could not extract text from PDF.'}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({'error': f'Failed to read PDF: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            elif filename.endswith('.docx'):
+                try:
+                    import docx
+                    document = docx.Document(cv_file)
+                    cv_text = "\n".join(p.text for p in document.paragraphs)
+                    if not cv_text.strip():
+                        return Response({'error': 'Could not extract text from Word document.'}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({'error': f'Failed to read Word document: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            elif filename.endswith('.doc'):
+                return Response(
+                    {'error': 'Older .doc files are not supported. Please save your CV as .docx or .pdf and try again.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            else:
+                return Response({'error': 'Unsupported file type. Please upload a PDF or Word (.docx) file.'}, status=status.HTTP_400_BAD_REQUEST)
+
         elif not cv_text:
-            return Response({'error': 'Either cv_file (PDF) or cv_text is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Either cv_file (PDF or DOCX) or cv_text is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # CV rewrite and cover letter require login
         if cv_rewrite_requested or cover_letter_requested:
