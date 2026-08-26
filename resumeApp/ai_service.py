@@ -8,6 +8,33 @@ load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+LEVEL_GUIDANCE = {
+    'entry': (
+        "This is for an entry-level candidate. Emphasize education, internships, "
+        "academic projects, and transferable skills. Frame limited experience as "
+        "eagerness to learn and strong foundational ability rather than a weakness."
+    ),
+    'mid': (
+        "This is for a mid-level candidate. Emphasize a solid track record of "
+        "delivering results, growing scope of responsibility, and concrete, "
+        "measurable achievements from recent roles."
+    ),
+    'senior': (
+        "This is for a senior-level candidate. Emphasize technical or functional "
+        "leadership, ownership of complex problems, mentoring others, and "
+        "measurable impact beyond individual tasks."
+    ),
+    'executive': (
+        "This is for an executive-level candidate. Emphasize strategic vision, "
+        "organizational and business impact, stakeholder and P&L responsibility, "
+        "and outcomes at a company-wide or market level rather than task-level detail."
+    ),
+}
+
+
+def get_level_guidance(level):
+    return LEVEL_GUIDANCE.get(level, LEVEL_GUIDANCE['mid'])
+
 
 def analyze_cv(cv_text, job_description):
     prompt = f"""
@@ -47,7 +74,7 @@ def analyze_cv(cv_text, job_description):
     return json.loads(result.strip())
 
 
-def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improvement_tips):
+def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improvement_tips, level='mid'):
     prompt = f"""
     You are an expert CV writer with a degree from harvard and you are highly regarded and recommeneded. Rewrite the following CV to better match the job description and make sure it's not generic.
 
@@ -61,6 +88,9 @@ def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improve
     - Matched Skills: {matched_skills}
     - Missing Skills: {missing_skills}
     - Improvement Tips: {improvement_tips}
+
+    Seniority Level:
+    {get_level_guidance(level)}
 
     Instructions:
     - Keep all real experience and facts from the original CV
@@ -79,7 +109,7 @@ def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improve
     return response.choices[0].message.content.strip()
 
 
-def generate_cover_letter(cv_text, job_description, matched_skills, improvement_tips):
+def generate_cover_letter(cv_text, job_description, matched_skills, improvement_tips, level='mid'):
     prompt = f"""
     You are an expert cover letter writer with a degree from harvard and you are highly regarded and recommeneded. Write a professional cover letter based on the CV and job description below and make sure it's not generic.
 
@@ -92,6 +122,9 @@ def generate_cover_letter(cv_text, job_description, matched_skills, improvement_
     Analysis Insights:
     - Matched Skills: {matched_skills}
     - Improvement Tips: {improvement_tips}
+
+    Seniority Level:
+    {get_level_guidance(level)}
 
     Instructions:
     - Write a compelling, professional cover letter

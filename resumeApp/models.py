@@ -1,6 +1,25 @@
 from django.db import models
 from accounts.models import User
 
+LEVEL_CHOICES = [
+    ('entry', 'Entry Level'),
+    ('mid', 'Mid Level'),
+    ('senior', 'Senior Level'),
+    ('executive', 'Executive'),
+]
+
+
+class GuestUsage(models.Model):
+    """Tracks free-trial usage for unauthenticated users by IP address,
+    since there's no account to attach a counter to."""
+    ip_address = models.GenericIPAddressField(unique=True)
+    analyses_used = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.ip_address} - {self.analyses_used} used"
+
 
 class Analysis(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='analyses')
@@ -15,6 +34,7 @@ class Analysis(models.Model):
     rewritten_cv = models.TextField(null=True, blank=True)
     cover_letter_requested = models.BooleanField(default=False)
     cover_letter = models.TextField(null=True, blank=True)
+    level = models.CharField(max_length=10, choices=LEVEL_CHOICES, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

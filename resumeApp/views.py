@@ -1,16 +1,22 @@
 from django.shortcuts import render
-
-# Create your views here.
-
-from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import Analysis
+from .models import Analysis, LEVEL_CHOICES, GuestUsage
 from .serializers import AnalysisSerializer
 from .ai_service import analyze_cv, rewrite_cv, generate_cover_letter, generate_cv_pdf, generate_cover_letter_pdf
+from accounts.models import LEVEL_MIN_TIER, FREE_ANALYSES_LIMIT
 from django.http import FileResponse
+
+
+def get_client_ip(request):
+    """Render sits behind a proxy, so the real client IP is in
+    X-Forwarded-For, not REMOTE_ADDR."""
+    xff = request.META.get('HTTP_X_FORWARDED_FOR')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR')
 
 
 class AnalyzeView(APIView):
@@ -20,6 +26,7 @@ class AnalyzeView(APIView):
         job_description = request.data.get('job_description')
         cv_rewrite_requested = request.data.get('cv_rewrite_requested', 'false').lower() == 'true'
         cover_letter_requested = request.data.get('cover_letter_requested', 'false').lower() == 'true'
+        level = request.data.get('level')
         cv_file = request.FILES.get('cv_file')
         cv_text = request.data.get('cv_text')
 
@@ -71,6 +78,64 @@ class AnalyzeView(APIView):
                     status=status.HTTP_401_UNAUTHORIZED
                 )
 
+        # Credit / free-trial gating for logged-in users. Guests keep the
+        # existing free-analysis-only flow (no rewrite/cover letter, ever).
+        used_free_trial = False
+        if request.user.is_authenticated:
+            user = request.user
+
+            if cv_rewrite_requested or cover_letter_requested:
+                if not level or level not in dict(LEVEL_CHOICES):
+                    return Response(
+                        {'error': 'A valid level (entry, mid, senior, executive) is required for CV rewrite or cover letter.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                if level not in user.unlocked_levels():
+                    return Response(
+                        {
+                            'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.',
+                            'requires_upgrade': True,
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                if user.analysis_credits < 1:
+                    return Response(
+                        {'error': 'You are out of credits. Purchase or top up a plan to continue.', 'requires_purchase': True},
+                        status=status.HTTP_402_PAYMENT_REQUIRED
+                    )
+                user.analysis_credits -= 1
+                user.save(update_fields=['analysis_credits'])
+
+            else:
+                # Plain analysis only — spend a free trial first, then credits.
+                if user.free_analyses_remaining > 0:
+                    user.free_analyses_used += 1
+                    user.save(update_fields=['free_analyses_used'])
+                    used_free_trial = True
+                elif user.analysis_credits >= 1:
+                    user.analysis_credits -= 1
+                    user.save(update_fields=['analysis_credits'])
+                else:
+                    return Response(
+                        {'error': 'Your free analyses are used up. Purchase a plan to continue.', 'requires_purchase': True},
+                        status=status.HTTP_402_PAYMENT_REQUIRED
+                    )
+
+        else:
+            # Guest (unauthenticated) — tracked by IP since there's no account.
+            ip = get_client_ip(request)
+            guest_usage, _ = GuestUsage.objects.get_or_create(ip_address=ip)
+            if guest_usage.analyses_used >= FREE_ANALYSES_LIMIT:
+                return Response(
+                    {
+                        'error': 'You have used your free analyses. Create a free account to continue.',
+                        'requires_auth': True,
+                    },
+                    status=status.HTTP_402_PAYMENT_REQUIRED
+                )
+            guest_usage.analyses_used += 1
+            guest_usage.save(update_fields=['analyses_used'])
+
         ai_result = analyze_cv(cv_text, job_description)
 
         # Only save to database if user is logged in
@@ -86,20 +151,25 @@ class AnalyzeView(APIView):
                 summary=ai_result['summary'],
                 cv_rewrite_requested=cv_rewrite_requested,
                 cover_letter_requested=cover_letter_requested,
+                level=level if (cv_rewrite_requested or cover_letter_requested) else None,
             )
 
             if cv_rewrite_requested:
-                rewritten = rewrite_cv(cv_text, job_description, ai_result['matched_skills'], ai_result['missing_skills'], ai_result['improvement_tips'])
+                rewritten = rewrite_cv(cv_text, job_description, ai_result['matched_skills'], ai_result['missing_skills'], ai_result['improvement_tips'], level=level)
                 analysis.rewritten_cv = rewritten
                 analysis.save()
 
             if cover_letter_requested:
-                cover_letter = generate_cover_letter(cv_text, job_description, ai_result['matched_skills'], ai_result['improvement_tips'])
+                cover_letter = generate_cover_letter(cv_text, job_description, ai_result['matched_skills'], ai_result['improvement_tips'], level=level)
                 analysis.cover_letter = cover_letter
                 analysis.save()
 
             serializer = AnalysisSerializer(analysis)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            response_data = dict(serializer.data)
+            response_data['analysis_credits'] = request.user.analysis_credits
+            response_data['free_analyses_remaining'] = request.user.free_analyses_remaining
+            response_data['used_free_trial'] = used_free_trial
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         # Guest user — return analysis without saving
         return Response({
