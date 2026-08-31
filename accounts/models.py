@@ -60,21 +60,21 @@ PLAN_TIER_CHOICES = [
 # Single source of truth for pricing/credits — imported by the payment views
 # so the amount charged and the credits granted can never drift apart.
 PLANS = {
-    'starter': {'tier': PLAN_STARTER, 'label': 'Starter', 'price_ngn': 1000, 'credits': 15},
-    'plus': {'tier': PLAN_PLUS, 'label': 'Plus', 'price_ngn': 1500, 'credits': 25},
-    'max': {'tier': PLAN_MAX, 'label': 'Max', 'price_ngn': 2000, 'credits': 35},
+    'starter': {'tier': PLAN_STARTER, 'label': 'Starter', 'price_ngn': 1000, 'credits': 10},
+    'plus': {'tier': PLAN_PLUS, 'label': 'Plus', 'price_ngn': 1500, 'credits': 15},
+    'max': {'tier': PLAN_MAX, 'label': 'Max', 'price_ngn': 2000, 'credits': 25},
 }
 
 # Which plan tier is required to unlock each rewrite/cover-letter level.
-# Starter -> Entry only. Plus -> Entry + Mid. Max -> everything.
+# Starter -> Entry + Mid. Plus & Max -> everything.
 LEVEL_MIN_TIER = {
     'entry': PLAN_STARTER,
-    'mid': PLAN_PLUS,
-    'senior': PLAN_MAX,
-    'executive': PLAN_MAX,
+    'mid': PLAN_STARTER,
+    'senior': PLAN_PLUS,
+    'executive': PLAN_PLUS,
 }
 
-FREE_ANALYSES_LIMIT = 2
+FREE_ANALYSES_LIMIT = 1
 
 
 class User(AbstractBaseUser):

@@ -1,4 +1,4 @@
-from groq import Groq
+from openai import OpenAI
 import json
 import io
 import os
@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+MODEL_NAME = "gpt-5.6-luna"
 
 LEVEL_GUIDANCE = {
     'entry': (
@@ -37,35 +39,41 @@ def get_level_guidance(level):
 
 
 def analyze_cv(cv_text, job_description):
-    prompt = f"""
-    You are an expert CV/Resume analyst with a degree from harvard and you are highly regarded and recommeneded. Analyze the following CV against the job description and return a JSON response only, no extra text.
+    system_msg = (
+        "You are a senior CV/resume analyst. You assess CVs against job "
+        "descriptions with precision and give concrete, actionable feedback."
+    )
+    prompt = f"""Analyze this CV against the job description.
 
-    CV:
-    {cv_text}
+CV:
+{cv_text}
 
-    Job Description:
-    {job_description}
+Job Description:
+{job_description}
 
-    Return this exact JSON structure:
-    {{
-        "match_score": <integer between 0 and 100>,
-        "matched_skills": "<comma separated list of matched skills>",
-        "missing_skills": "<comma separated list of missing skills>",
-        "improvement_tips": "<specific tips to improve the CV for this role>",
-        "summary": "<2-3 sentence overall verdict>"
-    }}
-
-    Return JSON only, no markdown, no extra text.
-    """
+Return this exact JSON structure:
+{{
+    "match_score": <integer 0-100>,
+    "matched_skills": "<comma separated list>",
+    "missing_skills": "<comma separated list>",
+    "improvement_tips": "<specific tips for this role>",
+    "summary": "<2-3 sentence verdict>"
+}}"""
 
     response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ],
+        reasoning_effort="medium",
+        max_completion_tokens=600,
+        response_format={"type": "json_object"},
     )
 
     result = response.choices[0].message.content.strip()
 
+    # Safety net in case the model still wraps output in a code fence
     if result.startswith("```"):
         result = result.split("```")[1]
         if result.startswith("json"):
@@ -75,71 +83,82 @@ def analyze_cv(cv_text, job_description):
 
 
 def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improvement_tips, level='mid'):
-    prompt = f"""
-    You are an expert CV writer with a degree from harvard and you are highly regarded and recommeneded. Rewrite the following CV to better match the job description and make sure it's not generic.
+    system_msg = (
+        "You are a senior professional CV writer. You rewrite CVs to be "
+        "sharp, specific, and tailored, never generic."
+    )
+    prompt = f"""Rewrite this CV to better match the job description.
 
-    Original CV:
-    {cv_text}
+Original CV:
+{cv_text}
 
-    Job Description:
-    {job_description}
+Job Description:
+{job_description}
 
-    Analysis Insights:
-    - Matched Skills: {matched_skills}
-    - Missing Skills: {missing_skills}
-    - Improvement Tips: {improvement_tips}
+Analysis Insights:
+- Matched Skills: {matched_skills}
+- Missing Skills: {missing_skills}
+- Improvement Tips: {improvement_tips}
 
-    Seniority Level:
-    {get_level_guidance(level)}
+Seniority Level:
+{get_level_guidance(level)}
 
-    Instructions:
-    - Keep all real experience and facts from the original CV
-    - Rewrite and restructure to highlight relevant skills
-    - Naturally incorporate missing skills only if they can be inferred from experience
-    - Use strong action verbs and quantifiable achievements
-    - Return the rewritten CV as plain text only, no extra commentary
-    """
+Instructions:
+- Keep all real experience and facts from the original CV
+- Rewrite and restructure to highlight relevant skills
+- Naturally incorporate missing skills only if inferable from experience
+- Use strong action verbs and quantifiable achievements
+- Return the rewritten CV as plain text only, no extra commentary"""
 
     response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ],
+        reasoning_effort="medium",
+        max_completion_tokens=1200,
     )
 
     return response.choices[0].message.content.strip()
 
 
 def generate_cover_letter(cv_text, job_description, matched_skills, improvement_tips, level='mid'):
-    prompt = f"""
-    You are an expert cover letter writer with a degree from harvard and you are highly regarded and recommeneded. Write a professional cover letter based on the CV and job description below and make sure it's not generic.
+    system_msg = (
+        "You are a senior professional cover letter writer. You write "
+        "compelling, specific cover letters that never sound generic."
+    )
+    prompt = f"""Write a professional cover letter based on this CV and job description.
 
-    CV:
-    {cv_text}
+CV:
+{cv_text}
 
-    Job Description:
-    {job_description}
+Job Description:
+{job_description}
 
-    Analysis Insights:
-    - Matched Skills: {matched_skills}
-    - Improvement Tips: {improvement_tips}
+Analysis Insights:
+- Matched Skills: {matched_skills}
+- Improvement Tips: {improvement_tips}
 
-    Seniority Level:
-    {get_level_guidance(level)}
+Seniority Level:
+{get_level_guidance(level)}
 
-    Instructions:
-    - Write a compelling, professional cover letter
-    - Keep it to 3-4 paragraphs
-    - Opening: express interest and strongest qualification
-    - Middle: highlight matched skills with specific examples from CV
-    - Closing: confident call to action
-    - Do not use generic phrases like "I am writing to apply"
-    - Return plain text only, no extra commentary
-    """
+Instructions:
+- Keep it to 3-4 paragraphs
+- Opening: express interest and strongest qualification
+- Middle: highlight matched skills with specific examples from CV
+- Closing: confident call to action
+- Do not use generic phrases like "I am writing to apply"
+- Return plain text only, no extra commentary"""
 
     response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ],
+        reasoning_effort="medium",
+        max_completion_tokens=700,
     )
 
     return response.choices[0].message.content.strip()
