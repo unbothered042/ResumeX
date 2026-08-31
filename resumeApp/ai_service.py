@@ -117,10 +117,16 @@ Instructions:
             {"role": "user", "content": prompt},
         ],
         reasoning_effort="medium",
-        max_completion_tokens=1200,
+        max_completion_tokens=4000,
     )
 
-    return response.choices[0].message.content.strip()
+    result = response.choices[0].message.content.strip()
+    if not result:
+        raise ValueError(
+            f"rewrite_cv returned empty output (finish_reason={response.choices[0].finish_reason}). "
+            "Likely truncated by max_completion_tokens before visible text was produced."
+        )
+    return result
 
 
 def generate_cover_letter(cv_text, job_description, matched_skills, improvement_tips, level='mid'):
@@ -158,10 +164,16 @@ Instructions:
             {"role": "user", "content": prompt},
         ],
         reasoning_effort="medium",
-        max_completion_tokens=700,
+        max_completion_tokens=1500,
     )
 
-    return response.choices[0].message.content.strip()
+    result = response.choices[0].message.content.strip()
+    if not result:
+        raise ValueError(
+            f"generate_cover_letter returned empty output (finish_reason={response.choices[0].finish_reason}). "
+            "Likely truncated by max_completion_tokens before visible text was produced."
+        )
+    return result
 
 
 def sanitize_text(text):
