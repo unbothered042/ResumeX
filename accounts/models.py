@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 
 
 class UserManager(BaseUserManager):
@@ -35,6 +36,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('last_name', 'User')
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_verified', True)
         return self.create_user(
             first_name=extra_fields.pop('first_name'),
             last_name=extra_fields.pop('last_name'),
@@ -85,6 +87,7 @@ class User(AbstractBaseUser):
     is_superuser = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -145,3 +148,27 @@ class Purchase(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.plan} - {self.status}"
+
+
+class EmailOTP(models.Model):
+    """One-time codes for both signup verification and password reset.
+    A `purpose` field keeps them in one table instead of two near-identical models."""
+    PURPOSE_SIGNUP = 'signup'
+    PURPOSE_RESET = 'reset'
+    PURPOSE_CHOICES = [
+        (PURPOSE_SIGNUP, 'Signup Verification'),
+        (PURPOSE_RESET, 'Password Reset'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otps')
+    code = models.CharField(max_length=6)
+    purpose = models.CharField(max_length=10, choices=PURPOSE_CHOICES)
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    def is_valid(self):
+        return not self.is_used and timezone.now() < self.expires_at
+
+    def __str__(self):
+        return f"{self.user.email} - {self.purpose} - {self.code}"
