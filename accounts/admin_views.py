@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework import status, serializers
 from rest_framework.permissions import IsAdminUser
 from .models import User, Purchase, PLANS
+from resumeApp.models import Analysis
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
@@ -73,8 +74,9 @@ class AdminGrantPlanView(APIView):
 
 class AdminRevenueView(APIView):
     """Revenue totals (daily/weekly/monthly/yearly) plus a 30-day daily
-    trend for the chart. Only counts successful paid purchases — admin-
-    granted plans have amount_ngn=0 so they don't inflate revenue."""
+    trend for the chart, and total CVs analyzed to date. Revenue only
+    counts successful paid purchases — admin-granted plans have
+    amount_ngn=0 so they don't inflate revenue."""
     permission_classes = [IsAdminUser]
 
     def get(self, request):
@@ -111,10 +113,13 @@ class AdminRevenueView(APIView):
             key = day.isoformat()
             trend.append({'date': key, 'revenue': trend_by_day.get(key, 0)})
 
+        total_cvs_analyzed = Analysis.objects.count()
+
         return Response({
             'daily': daily,
             'weekly': weekly,
             'monthly': monthly,
             'yearly': yearly,
             'trend': trend,
+            'total_cvs_analyzed': total_cvs_analyzed,
         }, status=status.HTTP_200_OK)
