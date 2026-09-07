@@ -1,5 +1,8 @@
 import uuid
+from datetime import timedelta
 from django.utils import timezone
+from django.db.models import Sum
+from django.db.models.functions import TruncDate
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, serializers
@@ -65,4 +68,53 @@ class AdminGrantPlanView(APIView):
         return Response({
             'message': f"Granted {plan['label']} plan to {target_user.email}.",
             'user': AdminUserSerializer(target_user).data,
+        }, status=status.HTTP_200_OK)
+
+
+class AdminRevenueView(APIView):
+    """Revenue totals (daily/weekly/monthly/yearly) plus a 30-day daily
+    trend for the chart. Only counts successful paid purchases — admin-
+    granted plans have amount_ngn=0 so they don't inflate revenue."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        now = timezone.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - timedelta(days=today_start.weekday())
+        month_start = today_start.replace(day=1)
+        year_start = today_start.replace(month=1, day=1)
+
+        successful = Purchase.objects.filter(status=Purchase.STATUS_SUCCESS)
+
+        def total_since(start):
+            return successful.filter(created_at__gte=start).aggregate(total=Sum('amount_ngn'))['total'] or 0
+
+        daily = total_since(today_start)
+        weekly = total_since(week_start)
+        monthly = total_since(month_start)
+        yearly = total_since(year_start)
+
+        # Last 30 days, one point per day, for the trend chart.
+        trend_start = today_start - timedelta(days=29)
+        trend_qs = (
+            successful.filter(created_at__gte=trend_start)
+            .annotate(day=TruncDate('created_at'))
+            .values('day')
+            .annotate(total=Sum('amount_ngn'))
+            .order_by('day')
+        )
+        trend_by_day = {row['day'].isoformat(): row['total'] for row in trend_qs}
+
+        trend = []
+        for i in range(30):
+            day = (trend_start + timedelta(days=i)).date()
+            key = day.isoformat()
+            trend.append({'date': key, 'revenue': trend_by_day.get(key, 0)})
+
+        return Response({
+            'daily': daily,
+            'weekly': weekly,
+            'monthly': monthly,
+            'yearly': yearly,
+            'trend': trend,
         }, status=status.HTTP_200_OK)

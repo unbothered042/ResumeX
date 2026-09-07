@@ -13,5 +13,6 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('admin/users/', admin_views.AdminUserListView.as_view(), name='admin-users'),
     path('admin/grant-plan/', admin_views.AdminGrantPlanView.as_view(), name='admin-grant-plan'),
+    path('admin/revenue/', admin_views.AdminRevenueView.as_view(), name='admin-revenue'),
     path('me/', views.MeView.as_view(), name='me'),
 ]
