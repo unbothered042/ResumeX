@@ -172,4 +172,6 @@ CORS_ALLOWED_ORIGINS = [
     "https://cvx-app.vercel.app",
     "https://cvxanalyzer.com.ng",
     "https://www.cvxanalyzer.com.ng",
+    "capacitor://localhost",
+    "http://localhost",
 ]
