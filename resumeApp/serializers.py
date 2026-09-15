@@ -6,14 +6,16 @@ class AnalysisSerializer(serializers.ModelSerializer):
     class Meta:
         model = Analysis
         fields = [
-            'id', 'cv_text', 'job_description', 'match_score',
+            'id', 'cv_text', 'job_description', 'match_score', 'score_breakdown',
             'matched_skills', 'missing_skills', 'improvement_tips',
             'summary', 'cv_rewrite_requested', 'rewritten_cv',
+            'rewritten_match_score', 'rewritten_score_breakdown',
             'cover_letter_requested', 'cover_letter', 'created_at',
         ]
         read_only_fields = [
-            'id', 'match_score', 'matched_skills', 'missing_skills',
+            'id', 'match_score', 'score_breakdown', 'matched_skills', 'missing_skills',
             'improvement_tips', 'summary', 'rewritten_cv',
+            'rewritten_match_score', 'rewritten_score_breakdown',
             'cover_letter', 'created_at',
         ]
 

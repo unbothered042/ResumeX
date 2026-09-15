@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import Analysis, LEVEL_CHOICES, GuestUsage, CVRebuild, CVCreation
 from .serializers import AnalysisSerializer, CVRebuildSerializer, CVCreationSerializer
-from .ai_service import analyze_cv, rewrite_cv, rebuild_cv, create_cv_from_scratch, generate_cover_letter, generate_cv_pdf, generate_cover_letter_pdf
+from .ai_service import analyze_cv, score_rewritten_cv, rewrite_cv, rebuild_cv, create_cv_from_scratch, generate_cover_letter, generate_cv_pdf, generate_cover_letter_pdf
 from accounts.models import LEVEL_MIN_TIER, FREE_ANALYSES_LIMIT
 from django.http import FileResponse
 import json
@@ -152,6 +152,7 @@ class AnalyzeView(APIView):
                 cv_text=cv_text,
                 job_description=job_description,
                 match_score=ai_result['match_score'],
+                score_breakdown=ai_result.get('score_breakdown'),
                 matched_skills=ai_result['matched_skills'],
                 missing_skills=ai_result['missing_skills'],
                 improvement_tips=ai_result['improvement_tips'],
@@ -164,6 +165,14 @@ class AnalyzeView(APIView):
             if cv_rewrite_requested:
                 rewritten = rewrite_cv(cv_text, job_description, ai_result['matched_skills'], ai_result['missing_skills'], ai_result['improvement_tips'], level=level)
                 analysis.rewritten_cv = rewritten
+
+                # Re-score the rewritten CV against the same job description
+                # so the response carries an actual before/after instead of
+                # reusing the original CV's score next to the new one.
+                rewritten_result = score_rewritten_cv(rewritten, job_description)
+                analysis.rewritten_match_score = rewritten_result.get('match_score')
+                analysis.rewritten_score_breakdown = rewritten_result.get('score_breakdown')
+
                 analysis.save()
 
             if cover_letter_requested:
@@ -182,6 +191,7 @@ class AnalyzeView(APIView):
         return Response({
             'id': None,
             'match_score': ai_result['match_score'],
+            'score_breakdown': ai_result.get('score_breakdown'),
             'matched_skills': ai_result['matched_skills'],
             'missing_skills': ai_result['missing_skills'],
             'improvement_tips': ai_result['improvement_tips'],

@@ -39,22 +39,91 @@ def get_level_guidance(level):
     return LEVEL_GUIDANCE.get(level, LEVEL_GUIDANCE['mid'])
 
 
+# ---------------------------------------------------------------------------
+# Tag stripping — rewrite_cv / rebuild_cv / create_cv_from_scratch return
+# markup like [SKILL]Languages|Python, SQL[/SKILL] and [JOB]title|dates|
+# company[/JOB]. If that markup is ever fed back into analyze_cv (e.g. when
+# re-scoring a rewritten CV), the model would be reading layout noise
+# instead of CV content. This flattens it back to plain text first.
+# ---------------------------------------------------------------------------
+
+TAG_STRIP_RE = re.compile(r'\[/?(?:EYEBROW|HEADING|PROJECT)\]')
+SKILL_TAG_RE = re.compile(r'^\[SKILL\](.*?)\|(.*?)\[/SKILL\]$')
+JOB_TAG_RE = re.compile(r'^\[JOB\](.*?)\|(.*?)\|(.*?)\[/JOB\]$')
+
+
+def strip_cv_tags(text):
+    """Convert tagged CV output back into plain readable CV text."""
+    if not text:
+        return text
+
+    out = []
+    for line in text.split('\n'):
+        line = line.strip()
+
+        m = SKILL_TAG_RE.match(line)
+        if m:
+            out.append(f"{m.group(1).strip()}: {m.group(2).strip()}")
+            continue
+
+        m = JOB_TAG_RE.match(line)
+        if m:
+            out.append(f"{m.group(1).strip()}, {m.group(3).strip()} ({m.group(2).strip()})")
+            continue
+
+        out.append(TAG_STRIP_RE.sub('', line))
+
+    return '\n'.join(out).strip()
+
+
 def analyze_cv(cv_text, job_description):
     system_msg = (
         "You are a senior CV/resume analyst. You assess CVs against job "
-        "descriptions with precision and give concrete, actionable feedback."
+        "descriptions with precision and give concrete, actionable feedback. "
+        "You score strictly against the rubric given, and you never adjust a "
+        "score to be encouraging or discouraging."
     )
     prompt = f"""Analyze this CV against the job description.
 
 CV:
-{cv_text}
+{strip_cv_tags(cv_text)}
 
 Job Description:
 {job_description}
 
+SCORING RUBRIC — build match_score by computing these four components
+separately, then summing them. Do not form a holistic impression first and
+work backwards to justify it — compute each component on its own merits.
+
+1. Required hard skills / tools (0-40)
+   Identify every hard skill, tool, language, or platform the job description
+   names. Award 40 * (number clearly evidenced in the CV / total named).
+   A skill counts as evidenced only if the CV shows it in experience,
+   projects, education, or a skills section — not merely plausible.
+
+2. Relevant experience depth (0-25)
+   Compare years and seniority of relevant experience against what the role
+   asks for. Full marks when the CV meets or exceeds it, proportionally less
+   below it.
+
+3. Domain and responsibility overlap (0-20)
+   How closely do the candidate's actual past responsibilities and industry
+   match the day-to-day work described in the job description.
+
+4. Evidence quality and presentation (0-15)
+   Are achievements concrete and quantified rather than vague duty
+   statements. Are the most role-relevant qualifications easy to find near
+   the top rather than buried. Is the CV structured and parseable.
+
 Return this exact JSON structure:
 {{
-    "match_score": <integer 0-100>,
+    "match_score": <integer 0-100, the sum of the four components above>,
+    "score_breakdown": {{
+        "required_skills": <integer 0-40>,
+        "experience_depth": <integer 0-25>,
+        "domain_overlap": <integer 0-20>,
+        "evidence_quality": <integer 0-15>
+    }},
     "matched_skills": "<comma separated list>",
     "missing_skills": "<comma separated list>",
     "improvement_tips": "<specific tips for this role>",
@@ -68,7 +137,7 @@ Return this exact JSON structure:
             {"role": "user", "content": prompt},
         ],
         reasoning_effort="medium",
-        max_completion_tokens=600,
+        max_completion_tokens=900,
         response_format={"type": "json_object"},
     )
 
@@ -81,6 +150,16 @@ Return this exact JSON structure:
             result = result[4:]
 
     return json.loads(result.strip())
+
+
+def score_rewritten_cv(rewritten_cv_text, job_description):
+    """Re-score a rewritten CV against the same job description.
+
+    Returns the same shape as analyze_cv (including score_breakdown). Call
+    this after rewrite_cv so the user sees an actual before/after instead of
+    the original CV's score sitting next to their new CV.
+    """
+    return analyze_cv(rewritten_cv_text, job_description)
 
 
 def rewrite_cv(cv_text, job_description, matched_skills, missing_skills, improvement_tips, level='mid'):

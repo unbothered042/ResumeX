@@ -26,12 +26,21 @@ class Analysis(models.Model):
     cv_text = models.TextField()
     job_description = models.TextField()
     match_score = models.IntegerField()
+    # Component breakdown behind match_score: required_skills (0-40),
+    # experience_depth (0-25), domain_overlap (0-20), evidence_quality (0-15).
+    # Null for rows created before the rubric-based scorer shipped.
+    score_breakdown = models.JSONField(null=True, blank=True)
     matched_skills = models.TextField()
     missing_skills = models.TextField()
     improvement_tips = models.TextField()
     summary = models.TextField()
     cv_rewrite_requested = models.BooleanField(default=False)
     rewritten_cv = models.TextField(null=True, blank=True)
+    # Score of rewritten_cv against the same job_description, so the
+    # frontend can show an actual before/after instead of reusing
+    # match_score (which is the *original* CV's score).
+    rewritten_match_score = models.IntegerField(null=True, blank=True)
+    rewritten_score_breakdown = models.JSONField(null=True, blank=True)
     cover_letter_requested = models.BooleanField(default=False)
     cover_letter = models.TextField(null=True, blank=True)
     level = models.CharField(max_length=10, choices=LEVEL_CHOICES, null=True, blank=True)
