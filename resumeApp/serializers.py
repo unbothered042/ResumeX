@@ -9,26 +9,23 @@ class AnalysisSerializer(serializers.ModelSerializer):
             'id', 'cv_text', 'job_description', 'match_score', 'score_breakdown',
             'matched_skills', 'missing_skills', 'improvement_tips',
             'summary', 'cv_rewrite_requested', 'rewritten_cv',
-            'rewritten_match_score', 'rewritten_score_breakdown',
-            'cover_letter_requested', 'cover_letter', 'created_at',
+            'rewritten_match_score', 'rewritten_score_breakdown', 'rewrite_level',
+            'cover_letter_requested', 'cover_letter', 'cover_letter_level',
+            'created_at',
         ]
         read_only_fields = [
             'id', 'match_score', 'score_breakdown', 'matched_skills', 'missing_skills',
             'improvement_tips', 'summary', 'rewritten_cv',
-            'rewritten_match_score', 'rewritten_score_breakdown',
-            'cover_letter', 'created_at',
+            'rewritten_match_score', 'rewritten_score_breakdown', 'rewrite_level',
+            'cover_letter', 'cover_letter_level', 'created_at',
         ]
 
 
 class CVRebuildSerializer(serializers.ModelSerializer):
     class Meta:
         model = CVRebuild
-        fields = [
-            'id', 'original_cv_text', 'rebuilt_cv', 'level', 'created_at',
-        ]
-        read_only_fields = [
-            'id', 'rebuilt_cv', 'created_at',
-        ]
+        fields = ['id', 'original_cv_text', 'rebuilt_cv', 'level', 'created_at']
+        read_only_fields = ['id', 'rebuilt_cv', 'created_at']
 
 
 class CVCreationSerializer(serializers.ModelSerializer):

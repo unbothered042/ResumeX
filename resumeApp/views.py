@@ -9,11 +9,12 @@ from .ai_service import analyze_cv, score_rewritten_cv, rewrite_cv, rebuild_cv, 
 from accounts.models import LEVEL_MIN_TIER, FREE_ANALYSES_LIMIT
 from django.http import FileResponse
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
-    """Render sits behind a proxy, so the real client IP is in
-    X-Forwarded-For, not REMOTE_ADDR."""
     xff = request.META.get('HTTP_X_FORWARDED_FOR')
     if xff:
         return xff.split(',')[0].strip()
@@ -21,8 +22,6 @@ def get_client_ip(request):
 
 
 def extract_cv_text(cv_file):
-    """Extracts plain text from an uploaded PDF or DOCX file.
-    Returns (cv_text, error_message) — error_message is None on success."""
     filename = (cv_file.name or '').lower()
 
     if filename.endswith('.pdf'):
@@ -57,13 +56,15 @@ def extract_cv_text(cv_file):
 
 
 class AnalyzeView(APIView):
+    """Runs the CV-vs-job-description match analysis only. Rewrite and
+    cover letter are separate, later requests against the resulting
+    Analysis id (see AnalysisExtraView), each gated and charged on its
+    own. Credits/free-trial/guest-usage are only spent after the AI call
+    succeeds, so a failed analysis never costs the user anything."""
     permission_classes = [AllowAny]
 
     def post(self, request):
         job_description = request.data.get('job_description')
-        cv_rewrite_requested = request.data.get('cv_rewrite_requested', 'false').lower() == 'true'
-        cover_letter_requested = request.data.get('cover_letter_requested', 'false').lower() == 'true'
-        level = request.data.get('level')
         cv_file = request.FILES.get('cv_file')
         cv_text = request.data.get('cv_text')
 
@@ -77,76 +78,46 @@ class AnalyzeView(APIView):
         elif not cv_text:
             return Response({'error': 'Either cv_file (PDF or DOCX) or cv_text is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # CV rewrite and cover letter require login
-        if cv_rewrite_requested or cover_letter_requested:
-            if not request.user.is_authenticated:
-                return Response(
-                    {'error': 'Please create a free account to access CV rewrite and cover letter features.', 'requires_auth': True},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-
-        # Credit / free-trial gating for logged-in users. Guests keep the
-        # existing free-analysis-only flow (no rewrite/cover letter, ever).
-        used_free_trial = False
+        # Pre-flight eligibility checks only (no deduction yet). This lets
+        # us reject up front without ever touching the AI provider, while
+        # still not spending anything until the AI call actually succeeds.
         if request.user.is_authenticated:
             user = request.user
-
-            if cv_rewrite_requested or cover_letter_requested:
-                if not level or level not in dict(LEVEL_CHOICES):
-                    return Response(
-                        {'error': 'A valid level (entry, mid, senior, executive) is required for CV rewrite or cover letter.'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                if level not in user.unlocked_levels():
-                    return Response(
-                        {
-                            'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.',
-                            'requires_upgrade': True,
-                        },
-                        status=status.HTTP_403_FORBIDDEN
-                    )
-                if user.analysis_credits < 1:
-                    return Response(
-                        {'error': 'You are out of credits. Purchase or top up a plan to continue.', 'requires_purchase': True},
-                        status=status.HTTP_402_PAYMENT_REQUIRED
-                    )
-                user.analysis_credits -= 1
-                user.save(update_fields=['analysis_credits'])
-
-            else:
-                # Plain analysis only — spend a free trial first, then credits.
-                if user.free_analyses_remaining > 0:
-                    user.free_analyses_used += 1
-                    user.save(update_fields=['free_analyses_used'])
-                    used_free_trial = True
-                elif user.analysis_credits >= 1:
-                    user.analysis_credits -= 1
-                    user.save(update_fields=['analysis_credits'])
-                else:
-                    return Response(
-                        {'error': 'Your free analyses are used up. Purchase a plan to continue.', 'requires_purchase': True},
-                        status=status.HTTP_402_PAYMENT_REQUIRED
-                    )
-
+            if user.free_analyses_remaining <= 0 and user.analysis_credits < 1:
+                return Response(
+                    {'error': 'Your free analyses are used up. Purchase a plan to continue.', 'requires_purchase': True},
+                    status=status.HTTP_402_PAYMENT_REQUIRED
+                )
         else:
-            # Guest (unauthenticated) — tracked by IP since there's no account.
             ip = get_client_ip(request)
             guest_usage, _ = GuestUsage.objects.get_or_create(ip_address=ip)
             if guest_usage.analyses_used >= FREE_ANALYSES_LIMIT:
                 return Response(
-                    {
-                        'error': 'You have used your free analyses. Create a free account to continue.',
-                        'requires_auth': True,
-                    },
+                    {'error': 'You have used your free analyses. Create a free account to continue.', 'requires_auth': True},
                     status=status.HTTP_402_PAYMENT_REQUIRED
                 )
-            guest_usage.analyses_used += 1
-            guest_usage.save(update_fields=['analyses_used'])
 
-        ai_result = analyze_cv(cv_text, job_description)
+        # The AI call itself. Nothing is deducted until this succeeds.
+        try:
+            ai_result = analyze_cv(cv_text, job_description)
+        except Exception as e:
+            logger.exception("analyze_cv failed")
+            return Response(
+                {'error': 'CV analysis failed. Please try again.', 'detail': str(e)},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
 
-        # Only save to database if user is logged in
+        used_free_trial = False
         if request.user.is_authenticated:
+            user = request.user
+            if user.free_analyses_remaining > 0:
+                user.free_analyses_used += 1
+                user.save(update_fields=['free_analyses_used'])
+                used_free_trial = True
+            else:
+                user.analysis_credits -= 1
+                user.save(update_fields=['analysis_credits'])
+
             analysis = Analysis.objects.create(
                 user=request.user,
                 cv_text=cv_text,
@@ -157,28 +128,7 @@ class AnalyzeView(APIView):
                 missing_skills=ai_result['missing_skills'],
                 improvement_tips=ai_result['improvement_tips'],
                 summary=ai_result['summary'],
-                cv_rewrite_requested=cv_rewrite_requested,
-                cover_letter_requested=cover_letter_requested,
-                level=level if (cv_rewrite_requested or cover_letter_requested) else None,
             )
-
-            if cv_rewrite_requested:
-                rewritten = rewrite_cv(cv_text, job_description, ai_result['matched_skills'], ai_result['missing_skills'], ai_result['improvement_tips'], level=level)
-                analysis.rewritten_cv = rewritten
-
-                # Re-score the rewritten CV against the same job description
-                # so the response carries an actual before/after instead of
-                # reusing the original CV's score next to the new one.
-                rewritten_result = score_rewritten_cv(rewritten, job_description)
-                analysis.rewritten_match_score = rewritten_result.get('match_score')
-                analysis.rewritten_score_breakdown = rewritten_result.get('score_breakdown')
-
-                analysis.save()
-
-            if cover_letter_requested:
-                cover_letter = generate_cover_letter(cv_text, job_description, ai_result['matched_skills'], ai_result['improvement_tips'], level=level)
-                analysis.cover_letter = cover_letter
-                analysis.save()
 
             serializer = AnalysisSerializer(analysis)
             response_data = dict(serializer.data)
@@ -187,27 +137,117 @@ class AnalyzeView(APIView):
             response_data['used_free_trial'] = used_free_trial
             return Response(response_data, status=status.HTTP_201_CREATED)
 
-        # Guest user — return analysis without saving
-        return Response({
-            'id': None,
-            'match_score': ai_result['match_score'],
-            'score_breakdown': ai_result.get('score_breakdown'),
-            'matched_skills': ai_result['matched_skills'],
-            'missing_skills': ai_result['missing_skills'],
-            'improvement_tips': ai_result['improvement_tips'],
-            'summary': ai_result['summary'],
-            'cv_rewrite_requested': False,
-            'rewritten_cv': None,
-            'cover_letter_requested': False,
-            'cover_letter': None,
-            'guest': True,
-        }, status=status.HTTP_200_OK)
+        else:
+            ip = get_client_ip(request)
+            guest_usage, _ = GuestUsage.objects.get_or_create(ip_address=ip)
+            guest_usage.analyses_used += 1
+            guest_usage.save(update_fields=['analyses_used'])
+
+            return Response({
+                'id': None,
+                'match_score': ai_result['match_score'],
+                'score_breakdown': ai_result.get('score_breakdown'),
+                'matched_skills': ai_result['matched_skills'],
+                'missing_skills': ai_result['missing_skills'],
+                'improvement_tips': ai_result['improvement_tips'],
+                'summary': ai_result['summary'],
+                'cv_rewrite_requested': False,
+                'rewritten_cv': None,
+                'cover_letter_requested': False,
+                'cover_letter': None,
+                'guest': True,
+            }, status=status.HTTP_200_OK)
+
+
+class AnalysisExtraView(APIView):
+    """Request a CV rewrite or a cover letter for an existing Analysis,
+    after the fact. Body: {"type": "rewrite" | "cover_letter", "level": "mid"}.
+    Login required (guests never had access to this). Charged one credit,
+    but only after the AI call succeeds — a failure costs nothing."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, id):
+        extra_type = request.data.get('type')
+        level = request.data.get('level')
+
+        if extra_type not in ('rewrite', 'cover_letter'):
+            return Response({'error': 'type must be "rewrite" or "cover_letter".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not level or level not in dict(LEVEL_CHOICES):
+            return Response({'error': 'A valid level (entry, mid, senior, executive) is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            analysis = Analysis.objects.get(id=id, user=request.user)
+        except Analysis.DoesNotExist:
+            return Response({'error': 'Analysis not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        user = request.user
+
+        if level not in user.unlocked_levels():
+            return Response(
+                {'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.', 'requires_upgrade': True},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if user.analysis_credits < 1:
+            return Response(
+                {'error': 'You are out of credits. Purchase or top up a plan to continue.', 'requires_purchase': True},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
+
+        if extra_type == 'rewrite':
+            try:
+                rewritten = rewrite_cv(
+                    analysis.cv_text, analysis.job_description,
+                    analysis.matched_skills, analysis.missing_skills,
+                    analysis.improvement_tips, level=level
+                )
+                rewritten_result = score_rewritten_cv(rewritten, analysis.job_description)
+            except Exception as e:
+                logger.exception("rewrite_cv failed")
+                return Response(
+                    {'error': 'CV rewrite failed. Please try again.', 'detail': str(e)},
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
+
+            user.analysis_credits -= 1
+            user.save(update_fields=['analysis_credits'])
+
+            analysis.cv_rewrite_requested = True
+            analysis.rewritten_cv = rewritten
+            analysis.rewritten_match_score = rewritten_result.get('match_score')
+            analysis.rewritten_score_breakdown = rewritten_result.get('score_breakdown')
+            analysis.rewrite_level = level
+            analysis.save()
+
+        else:  # cover_letter
+            try:
+                cover_letter = generate_cover_letter(
+                    analysis.cv_text, analysis.job_description,
+                    analysis.matched_skills, analysis.improvement_tips, level=level
+                )
+            except Exception as e:
+                logger.exception("generate_cover_letter failed")
+                return Response(
+                    {'error': 'Cover letter generation failed. Please try again.', 'detail': str(e)},
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
+
+            user.analysis_credits -= 1
+            user.save(update_fields=['analysis_credits'])
+
+            analysis.cover_letter_requested = True
+            analysis.cover_letter = cover_letter
+            analysis.cover_letter_level = level
+            analysis.save()
+
+        serializer = AnalysisSerializer(analysis)
+        response_data = dict(serializer.data)
+        response_data['analysis_credits'] = user.analysis_credits
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class RebuildCVView(APIView):
-    """'Rebuild my CV' — a general professional rewrite with no job
-    description to tailor against. Always requires login and a credit,
-    same gating as CV rewrite/cover letter."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -223,19 +263,13 @@ class RebuildCVView(APIView):
             return Response({'error': 'Either cv_file (PDF or DOCX) or cv_text is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if level not in dict(LEVEL_CHOICES):
-            return Response(
-                {'error': 'A valid level (entry, mid, senior, executive) is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'A valid level (entry, mid, senior, executive) is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         user = request.user
 
         if level not in user.unlocked_levels():
             return Response(
-                {
-                    'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.',
-                    'requires_upgrade': True,
-                },
+                {'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.', 'requires_upgrade': True},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -245,9 +279,11 @@ class RebuildCVView(APIView):
                 status=status.HTTP_402_PAYMENT_REQUIRED
             )
 
-        # AI call happens before the credit is deducted, so a failure here
-        # never costs the user a credit.
-        rebuilt = rebuild_cv(cv_text, level=level)
+        try:
+            rebuilt = rebuild_cv(cv_text, level=level)
+        except Exception as e:
+            logger.exception("rebuild_cv failed")
+            return Response({'error': 'CV rebuild failed. Please try again.', 'detail': str(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
         user.analysis_credits -= 1
         user.save(update_fields=['analysis_credits'])
@@ -266,10 +302,6 @@ class RebuildCVView(APIView):
 
 
 class CreateCVView(APIView):
-    """Build a brand-new CV from the guided wizard's structured input.
-    Accepts multipart form data: 'data' is a JSON string of the structured
-    fields (matching CVCreation), 'level', and an optional
-    'reference_cv_file' used purely as a style/content reference."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -289,19 +321,13 @@ class CreateCVView(APIView):
             return Response({'error': 'full_name and email are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if level not in dict(LEVEL_CHOICES):
-            return Response(
-                {'error': 'A valid level (entry, mid, senior, executive) is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'A valid level (entry, mid, senior, executive) is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         user = request.user
 
         if level not in user.unlocked_levels():
             return Response(
-                {
-                    'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.',
-                    'requires_upgrade': True,
-                },
+                {'error': f'Your current plan does not include the {level} level. Upgrade your plan to unlock it.', 'requires_upgrade': True},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -317,9 +343,11 @@ class CreateCVView(APIView):
             if extraction_error:
                 return Response({'error': extraction_error}, status=status.HTTP_400_BAD_REQUEST)
 
-        # AI call happens before the credit is deducted, so a failure here
-        # never costs the user a credit.
-        generated = create_cv_from_scratch(data, level=level, reference_cv_text=reference_cv_text)
+        try:
+            generated = create_cv_from_scratch(data, level=level, reference_cv_text=reference_cv_text)
+        except Exception as e:
+            logger.exception("create_cv_from_scratch failed")
+            return Response({'error': 'CV creation failed. Please try again.', 'detail': str(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
         user.analysis_credits -= 1
         user.save(update_fields=['analysis_credits'])
