@@ -136,12 +136,18 @@ Return this exact JSON structure:
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},
         ],
-        reasoning_effort="medium",
-        max_completion_tokens=900,
+        reasoning_effort="low",
+        max_completion_tokens=2500,
         response_format={"type": "json_object"},
     )
 
     result = response.choices[0].message.content.strip()
+
+    if not result:
+        raise ValueError(
+            f"analyze_cv returned empty output (finish_reason={response.choices[0].finish_reason}). "
+            "Likely truncated by max_completion_tokens before visible text was produced."
+        )
 
     # Safety net in case the model still wraps output in a code fence
     if result.startswith("```"):
@@ -149,7 +155,13 @@ Return this exact JSON structure:
         if result.startswith("json"):
             result = result[4:]
 
-    return json.loads(result.strip())
+    try:
+        return json.loads(result.strip())
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"analyze_cv returned non-JSON output (finish_reason={response.choices[0].finish_reason}): "
+            f"{result[:300]!r}"
+        ) from e
 
 
 def score_rewritten_cv(rewritten_cv_text, job_description):
